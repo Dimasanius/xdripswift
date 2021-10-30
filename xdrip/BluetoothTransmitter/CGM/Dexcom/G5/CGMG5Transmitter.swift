@@ -14,7 +14,7 @@ class CGMG5Transmitter:BluetoothTransmitter, CGMTransmitter {
     /// G5 or G6 age - only used internally, if nil then it was  never received
     ///
     /// created public because inheriting classes need it
-    var age: TimeInterval?
+    var transmitterStartDate: Date?
     
     /// CGMG5TransmitterDelegate
     public weak var cGMG5TransmitterDelegate: CGMG5TransmitterDelegate?
@@ -100,7 +100,10 @@ class CGMG5Transmitter:BluetoothTransmitter, CGMTransmitter {
     private var waitingPairingConfirmation = false
     
     /// to swap between request firmware or battery
-    var requestFirmware = true
+    private var requestFirmware = true
+    
+    /// backFillStream
+    private var backFillStream = DexcomBackfillStream()
 
     // MARK: - functions
     
@@ -485,11 +488,42 @@ class CGMG5Transmitter:BluetoothTransmitter, CGMTransmitter {
             
         case .CBUUID_Backfill:
             
-            handleBackfillStream
+            // transmitterDate should be non nil
+            guard let transmitterStartDate = transmitterStartDate else {
+                
+                trace("    started processing backfillstream but transmitterStartDate is nil, no further processing", log: log, category: ConstantsLog.categoryCGMG5, type: .info)
+                
+                return
+                
+            }
+            
+            // unwrap characteristic value
+            guard let value = characteristic.value else {return}
+            
+            // push value to backFillStream
+            backFillStream.push(value)
+
+            // initialize glucoseDataArray, this array will contain the glucose values in the stream
+            var glucoseDataArray = [GlucoseData]()
+            
+            // iterate through backsie's
+            for backsie in backFillStream.decode() {
+                
+                let backsieDate = transmitterStartDate + Double(backsie.dexTime)
+                
+                let diff = Date().timeIntervalSince1970 - backsieDate.timeIntervalSince1970
+                
+                guard diff > 0, diff < TimeInterval.hours(6) else { continue }
+                
+                glucoseDataArray.append(GlucoseData(timeStamp: backsieDate, glucoseLevelRaw: Double(backsie.glucose)))
+                
+            }
+
+            cgmTransmitterDelegate?.cgmTransmitterInfoReceived(glucoseData: &glucoseDataArray, transmitterBatteryInfo: nil, sensorTimeInMinutes: nil)
             
         default:
             
-            trace("    characteristic UUID not processed", log: log, category: ConstantsLog.categoryCGMG5, type: .info)
+            trace("    characteristic %{public}@ not processed", log: log, category: ConstantsLog.categoryCGMG5, type: .error, characteristic.uuid.uuidString)
             
             if let value = characteristic.value {
                 
@@ -756,18 +790,18 @@ class CGMG5Transmitter:BluetoothTransmitter, CGMTransmitter {
     /// process transmitterTimeRxMessage
     private func processTransmitterTimeRxMessage(value:Data) {
         
-        if let transmitterTimeRxMessage = TransmitterTimeRxMessage(data: value) {
+        if let transmitterTimeRxMessage = DexcomTransmitterTimeRxMessage(data: value) {
             
             // assign transmittertime
-            age = transmitterTimeRxMessage.age
+            transmitterStartDate = transmitterTimeRxMessage.transmitterStartDate
             
-            if let age = age {
+            if let transmitterStartDate = transmitterStartDate {
                 
                 // send to delegate
-                cGMG5TransmitterDelegate?.received(age: age, cGMG5Transmitter: self)
+                cGMG5TransmitterDelegate?.received(transmitterStartDate: transmitterStartDate, cGMG5Transmitter: self)
 
             } else {
-                trace("age is nil", log: log, category: ConstantsLog.categoryCGMG5, type: .error)
+                trace("transmitterStartDate is nil", log: log, category: ConstantsLog.categoryCGMG5, type: .error)
             }
             
         } else {

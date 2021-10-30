@@ -28,4 +28,6 @@ extension DexcomG5 {
     
     @NSManaged public var isDexcomG6: Bool
     
+    @NSManaged public var transmitterStartDate: Date?
+    
 }

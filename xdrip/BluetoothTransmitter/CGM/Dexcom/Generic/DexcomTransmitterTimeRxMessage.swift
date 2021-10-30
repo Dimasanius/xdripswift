@@ -1,8 +1,12 @@
 import Foundation
 
-struct TransmitterTimeRxMessage {
+struct DexcomTransmitterTimeRxMessage {
     
-    let age: TimeInterval
+    /// age as received from
+    private let age: TimeInterval
+    
+    /// transmitter start time
+    public let transmitterStartDate: Date
     
     init?(data: Data) {
         
@@ -11,6 +15,8 @@ struct TransmitterTimeRxMessage {
         guard data.starts(with: .transmitterTimeRx) else {return nil}
         
         age = TimeInterval(data.subdata(in: 2..<6).to(Int32.self))
+        
+        transmitterStartDate = Date() - age
         
     }
     
